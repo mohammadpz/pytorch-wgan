@@ -3,14 +3,12 @@ import torch.nn as nn
 from torch.autograd import Variable
 import time as t
 import os
-from utils.tensorboard_logger import Logger
-from utils.inception_score import get_inception_score
-from itertools import chain
+# from utils.tensorboard_logger import Logger
 from torchvision import utils
 
 class Generator(torch.nn.Module):
     def __init__(self, channels):
-        super().__init__()
+        super(Generator, self).__init__()
         # Filters [1024, 512, 256]
         # Input_dim = 100
         # Output_dim = C (number of channels)
@@ -43,7 +41,7 @@ class Generator(torch.nn.Module):
 
 class Discriminator(torch.nn.Module):
     def __init__(self, channels):
-        super().__init__()
+        super(Discriminator, self).__init__()
         # Filters [256, 512, 1024]
         # Input_dim = channels (Cx64x64)
         # Output_dim = 1
@@ -100,7 +98,7 @@ class DCGAN_MODEL(object):
         self.batch_size = args.batch_size
 
         # Set the logger
-        self.logger = Logger('./logs')
+        # self.logger = Logger('./logs')
         self.number_of_images = 10
 
     # cuda support
