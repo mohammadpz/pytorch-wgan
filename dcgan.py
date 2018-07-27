@@ -3,8 +3,87 @@ import torch.nn as nn
 from torch.autograd import Variable
 import time as t
 import os
+from inception_score import get_inception_score
+from itertools import chain
 # from utils.tensorboard_logger import Logger
 from torchvision import utils
+from torch.optim.optimizer import Optimizer
+import math
+
+
+class Adamp(Optimizer):
+
+    def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
+                 weight_decay=0, amsgrad=False, md=1):
+        defaults = dict(lr=lr, betas=betas, eps=eps,
+                        weight_decay=weight_decay, amsgrad=amsgrad)
+        self.md = md
+        super(Adamp, self).__init__(params, defaults)
+
+    def step(self, closure=None):
+        """Performs a single optimization step.
+        Arguments:
+            closure (callable, optional): A closure that reevaluates the model
+                and returns the loss.
+        """
+        loss = None
+        if closure is not None:
+            loss = closure()
+
+        for group in self.param_groups:
+            for p in group['params']:
+                if p.grad is None:
+                    continue
+                grad = p.grad.data
+                if grad.is_sparse:
+                    raise RuntimeError('Adamp does not support sparse gradients, please consider SparseAdamp instead')
+                amsgrad = group['amsgrad']
+
+                state = self.state[p]
+
+                # State initialization
+                if len(state) == 0:
+                    state['step'] = 0
+                    # Exponential moving average of gradient values
+                    state['exp_avg'] = torch.zeros_like(p.data)
+                    # Exponential moving average of squared gradient values
+                    state['exp_avg_sq'] = torch.zeros_like(p.data)
+                    if amsgrad:
+                        # Maintains max of all exp. moving avg. of sq. grad. values
+                        state['max_exp_avg_sq'] = torch.zeros_like(p.data)
+
+                exp_avg, exp_avg_sq = state['exp_avg'], state['exp_avg_sq']
+                if amsgrad:
+                    max_exp_avg_sq = state['max_exp_avg_sq']
+                beta1, beta2 = group['betas']
+
+                state['step'] += 1
+
+                if group['weight_decay'] != 0:
+                    grad = grad.add(group['weight_decay'], p.data)
+
+                # Decay the first and second moment running average coefficient
+                if self.md == 0:
+                    exp_avg.mul_(beta1).add_(1 - beta1, grad)
+                else:
+                    exp_avg.mul_(beta1).add_(1, grad)
+                exp_avg_sq.mul_(beta2).addcmul_(1 - beta2, grad, grad)
+                if amsgrad:
+                    # Maintains the maximum of all 2nd moment running avg. till now
+                    torch.max(max_exp_avg_sq, exp_avg_sq, out=max_exp_avg_sq)
+                    # Use the max. for normalizing running avg. of gradient
+                    denom = max_exp_avg_sq.sqrt().add_(group['eps'])
+                else:
+                    denom = exp_avg_sq.sqrt().add_(group['eps'])
+
+                bias_correction1 = 1 - beta1 ** state['step']
+                bias_correction2 = 1 - beta2 ** state['step']
+                step_size = group['lr'] * math.sqrt(bias_correction2) / bias_correction1
+
+                p.data.addcdiv_(-step_size, exp_avg, denom)
+
+        return loss
+
 
 class Generator(torch.nn.Module):
     def __init__(self, channels):
@@ -91,8 +170,12 @@ class DCGAN_MODEL(object):
         self.check_cuda(args.cuda)
 
         # Using lower learning rate than suggested by (ADAM authors) lr=0.0002  and Beta_1 = 0.5 instead od 0.9 works better [Radford2015]
-        self.d_optimizer = torch.optim.Adam(self.D.parameters(), lr=0.0002, betas=(0.5, 0.999))
-        self.g_optimizer = torch.optim.Adam(self.G.parameters(), lr=0.0002, betas=(0.5, 0.999))
+        self.d_optimizer = torch.optim.Adam(self.D.parameters(), lr=0.0001, betas=(0.5, 0.999))
+
+        if args.nm:
+            self.g_optimizer = torch.optim.Adam(self.G.parameters(), lr=0.0001, betas=(0.5, 0.999))
+        else:
+            self.g_optimizer = Adamp(self.G.parameters(), lr=0.0001, betas=(-0.5, 0.9))
 
         self.epochs = args.epochs
         self.batch_size = args.batch_size
@@ -112,10 +195,14 @@ class DCGAN_MODEL(object):
             print(self.cuda)
 
 
-    def train(self, train_loader):
+    def train(self, train_loader, args):
         self.t_begin = t.time()
         generator_iter = 0
-        #self.file = open("inception_score_graph.txt", "w")
+        if args.nm:
+            print('Negative Momentum is on!')
+            self.file = open("inception_score_graph_DCGAN_NM.txt", "w")
+        else:
+            self.file = open("inception_score_graph_DCGAN.txt", "w")
 
         for epoch in range(self.epochs):
             self.epoch_start_time = t.time()
@@ -176,77 +263,50 @@ class DCGAN_MODEL(object):
                 self.g_optimizer.step()
                 generator_iter += 1
 
-
-                if generator_iter % 1000 == 0:
+                if generator_iter % 200 == 1:
                     # Workaround because graphic card memory can't store more than 800+ examples in memory for generating image
                     # Therefore doing loop and generating 800 examples and stacking into list of samples to get 8000 generated images
                     # This way Inception score is more correct since there are different generated examples from every class of Inception model
-                    # sample_list = []
-                    # for i in range(10):
-                    #     z = Variable(torch.randn(800, 100, 1, 1)).cuda(self.cuda_index)
-                    #     samples = self.G(z)
-                    #     sample_list.append(samples.data.cpu().numpy())
-                    #
-                    # # Flattening list of lists into one list of numpy arrays
-                    # new_sample_list = list(chain.from_iterable(sample_list))
-                    # print("Calculating Inception Score over 8k generated images")
-                    # # Feeding list of numpy arrays
-                    # inception_score = get_inception_score(new_sample_list, cuda=True, batch_size=32,
-                    #                                       resize=True, splits=10)
-                    print('Epoch-{}'.format(epoch + 1))
-                    self.save_model()
+                    sample_list = []
+                    for i in range(5):
+                        print(i)
+                        z = Variable(torch.randn(800, 100, 1, 1)).cuda(self.cuda_index)
+                        samples = self.G(z)
+                        sample_list.append(samples.data.cpu().numpy())
 
-                    if not os.path.exists('training_result_images/'):
-                        os.makedirs('training_result_images/')
+                    # Flattening list of lists into one list of numpy arrays
+                    new_sample_list = list(chain.from_iterable(sample_list))
+                    print("Calculating Inception Score over 8k generated images")
+                    # Feeding list of numpy arrays
+                    inception_score = get_inception_score(new_sample_list, cuda=True, batch_size=32,
+                                                          resize=True, splits=10)
 
-                    # Denormalize images and save them in grid 8x8
-                    z = Variable(torch.randn(800, 100, 1, 1)).cuda(self.cuda_index)
-                    samples = self.G(z)
-                    samples = samples.mul(0.5).add(0.5)
-                    samples = samples.data.cpu()[:64]
-                    grid = utils.make_grid(samples)
-                    utils.save_image(grid, 'training_result_images/img_generatori_iter_{}.png'.format(str(generator_iter).zfill(3)))
-
-                    time = t.time() - self.t_begin
-                    #print("Inception score: {}".format(inception_score))
+                    print("Inception score: {}".format(inception_score))
                     print("Generator iter: {}".format(generator_iter))
-                    print("Time {}".format(time))
+
+                    # print('Epoch-{}'.format(epoch + 1))
+                    # self.save_model()
+
+                    # if not os.path.exists('training_result_images/'):
+                    #     os.makedirs('training_result_images/')
+
+                    # # Denormalize images and save them in grid 8x8
+                    # z = Variable(torch.randn(800, 100, 1, 1)).cuda(self.cuda_index)
+                    # samples = self.G(z)
+                    # samples = samples.mul(0.5).add(0.5)
+                    # samples = samples.data.cpu()[:64]
+                    # grid = utils.make_grid(samples)
+                    # utils.save_image(grid, 'training_result_images/img_generatori_iter_{}.png'.format(str(generator_iter).zfill(3)))
+
+                    # time = t.time() - self.t_begin
+                    # print("Inception score: {}".format(inception_score))
+                    # print("Generator iter: {}".format(generator_iter))
+                    # print("Time {}".format(time))
 
                     # Write to file inception_score, gen_iters, time
-                    #output = str(generator_iter) + " " + str(time) + " " + str(inception_score[0]) + "\n"
-                    #self.file.write(output)
-
-
-                if ((i + 1) % 100) == 0:
-                    print("Epoch: [%2d] [%4d/%4d] D_loss: %.8f, G_loss: %.8f" %
-                          ((epoch + 1), (i + 1), train_loader.dataset.__len__() // self.batch_size, d_loss.data[0], g_loss.data[0]))
-
-                    z = Variable(torch.randn(self.batch_size, 100, 1, 1).cuda(self.cuda_index))
-
-                    # TensorBoard logging
-                    # Log the scalar values
-                    info = {
-                        'd_loss': d_loss.data[0],
-                        'g_loss': g_loss.data[0]
-                    }
-
-                    for tag, value in info.items():
-                        self.logger.scalar_summary(tag, value, generator_iter)
-
-                    # Log values and gradients of the parameters
-                    for tag, value in self.D.named_parameters():
-                        tag = tag.replace('.', '/')
-                        self.logger.histo_summary(tag, self.to_np(value), generator_iter)
-                        self.logger.histo_summary(tag + '/grad', self.to_np(value.grad), generator_iter)
-
-                    # Log the images while training
-                    info = {
-                        'real_images': self.real_images(images, self.number_of_images),
-                        'generated_images': self.generate_img(z, self.number_of_images)
-                    }
-
-                    for tag, images in info.items():
-                        self.logger.image_summary(tag, images, generator_iter)
+                    time = t.time() - self.t_begin
+                    output = str(generator_iter) + " " + str(time) + " " + str(inception_score[0]) + "\n"
+                    self.file.write(output)
 
 
         self.t_end = t.time()

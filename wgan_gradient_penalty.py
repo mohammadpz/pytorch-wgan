@@ -6,6 +6,7 @@ from torch import autograd
 import time as t
 import matplotlib.pyplot as plt
 plt.switch_backend('agg')
+from inception_score import get_inception_score
 import os
 # from utils.tensorboard_logger import Logger
 from itertools import chain
@@ -57,17 +58,17 @@ class Discriminator(torch.nn.Module):
             # Image (Cx32x32)
             nn.Conv2d(in_channels=channels, out_channels=256, kernel_size=4, stride=2, padding=1),
             nn.InstanceNorm2d(256, affine=True),
-            nn.LeakyReLU(0.2, inplace=True),
+            nn.LeakyReLU(0.2),
 
             # State (256x16x16)
             nn.Conv2d(in_channels=256, out_channels=512, kernel_size=4, stride=2, padding=1),
             nn.InstanceNorm2d(512, affine=True),
-            nn.LeakyReLU(0.2, inplace=True),
+            nn.LeakyReLU(0.2),
 
             # State (512x8x8)
             nn.Conv2d(in_channels=512, out_channels=1024, kernel_size=4, stride=2, padding=1),
             nn.InstanceNorm2d(1024, affine=True),
-            nn.LeakyReLU(0.2, inplace=True))
+            nn.LeakyReLU(0.2))
             # output of main module --> State (1024x4x4)
 
         self.output = nn.Sequential(
@@ -124,9 +125,9 @@ class WGAN_GP(object):
             print("Cuda enabled flag: {}".format(self.cuda))
 
 
-    def train(self, train_loader):
+    def train(self, train_loader, args):
         self.t_begin = t.time()
-        self.file = open("inception_score_graph.txt", "w")
+        self.file = open("inception_score_graph_WGAN.txt", "w")
 
         # Now batches are callable self.data.next()
         self.data = self.get_infinite_batches(train_loader)
@@ -204,71 +205,35 @@ class WGAN_GP(object):
             self.g_optimizer.step()
 
             # Saving model and sampling images every 1000th generator iterations
-            if (g_iter) % 1000 == 0:
-                self.save_model()
-                # # Workaround because graphic card memory can't store more than 830 examples in memory for generating image
-                # # Therefore doing loop and generating 800 examples and stacking into list of samples to get 8000 generated images
-                # # This way Inception score is more correct since there are different generated examples from every class of Inception model
-                # sample_list = []
-                # for i in range(125):
-                #     samples  = self.data.next()
-                # #     z = Variable(torch.randn(800, 100, 1, 1)).cuda(self.cuda_index)
-                # #     samples = self.G(z)
-                #     sample_list.append(samples.data.cpu().numpy())
-                # #
-                # # # Flattening list of list into one list
-                # new_sample_list = list(chain.from_iterable(sample_list))
-                # print("Calculating Inception Score over 8k generated images")
-                # # # Feeding list of numpy arrays
-                # inception_score = get_inception_score(new_sample_list, cuda=True, batch_size=32,
-                #                                       resize=True, splits=10)
-
-                if not os.path.exists('training_result_images/'):
-                    os.makedirs('training_result_images/')
-
-                # Denormalize images and save them in grid 8x8
-                z = Variable(torch.randn(800, 100, 1, 1)).cuda(self.cuda_index)
-                samples = self.G(z)
-                samples = samples.mul(0.5).add(0.5)
-                samples = samples.data.cpu()[:64]
-                grid = utils.make_grid(samples)
-                utils.save_image(grid, 'training_result_images/img_generatori_iter_{}.png'.format(str(g_iter).zfill(3)))
+            if (g_iter) % 200 == 0:
+                # self.save_model()
+                # Workaround because graphic card memory can't store more than 830 examples in memory for generating image
+                # Therefore doing loop and generating 800 examples and stacking into list of samples to get 8000 generated images
+                # This way Inception score is more correct since there are different generated examples from every class of Inception model
+                sample_list = []
+                for i in range(5):
+                    print(i)
+                    # samples = self.data.next()
+                    z = Variable(torch.randn(800, 100, 1, 1)).cuda(self.cuda_index)
+                    samples = self.G(z)
+                    sample_list.append(samples.data.cpu().numpy())
+                #
+                # # Flattening list of list into one list
+                new_sample_list = list(chain.from_iterable(sample_list))
+                print("Calculating Inception Score over 8k generated images")
+                # # Feeding list of numpy arrays
+                inception_score = get_inception_score(new_sample_list, cuda=True, batch_size=32,
+                                                      resize=True, splits=10)
 
                 # Testing
                 time = t.time() - self.t_begin
-                #print("Real Inception score: {}".format(inception_score))
+                print("Inception score: {}".format(inception_score))
                 print("Generator iter: {}".format(g_iter))
                 print("Time {}".format(time))
 
                 # Write to file inception_score, gen_iters, time
-                #output = str(g_iter) + " " + str(time) + " " + str(inception_score[0]) + "\n"
-                #self.file.write(output)
-
-
-                # ============ TensorBoard logging ============#
-                # (1) Log the scalar values
-                info = {
-                    'Wasserstein distance': Wasserstein_D.data[0],
-                    'Loss D': d_loss.data[0],
-                    'Loss G': g_cost.data[0],
-                    'Loss D Real': d_loss_real.data[0],
-                    'Loss D Fake': d_loss_fake.data[0]
-
-                }
-
-                for tag, value in info.items():
-                    print(str(tag) + ' ; ' + str(value) + ' ; ' + str(g_iter + 1))
-                    # self.logger.scalar_summary(tag, value, g_iter + 1)
-
-                # (3) Log the images
-                info = {
-                    'real_images': self.real_images(images, self.number_of_images),
-                    'generated_images': self.generate_img(z, self.number_of_images)
-                }
-
-                # for tag, images in info.items():
-                #     self.logger.image_summary(tag, images, g_iter + 1)
-
+                output = str(g_iter) + " " + str(time) + " " + str(inception_score[0]) + "\n"
+                self.file.write(output)
 
 
         self.t_end = t.time()
@@ -315,7 +280,7 @@ class WGAN_GP(object):
                                grad_outputs=torch.ones(
                                    prob_interpolated.size()).cuda(self.cuda_index) if self.cuda else torch.ones(
                                    prob_interpolated.size()),
-                               create_graph=True, retain_graph=True)[0]
+                               create_graph=True, retain_graph=True, only_inputs=True)[0]
 
         grad_penalty = ((gradients.norm(2, dim=1) - 1) ** 2).mean() * self.lambda_term
         return grad_penalty

@@ -18,7 +18,7 @@ def main(args):
 
     # Start model training
     if args.is_train == 'True':
-        model.train(train_loader)
+        model.train(train_loader, args)
 
     # start evaluating on test data
     else:
