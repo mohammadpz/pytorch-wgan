@@ -18,6 +18,7 @@ def parse_args():
     parser.add_argument('--load_G', type=str, default='False', help='Path for loading Generator network')
     parser.add_argument('--generator_iters', type=int, default=10000, help='The number of iterations for generator in WGAN model.')
     parser.add_argument('--nm', action='store_true')
+    parser.add_argument('--sat', action='store_true')
     return check_args(parser.parse_args())
 
 # Checking arguments

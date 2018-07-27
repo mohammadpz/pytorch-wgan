@@ -170,12 +170,12 @@ class DCGAN_MODEL(object):
         self.check_cuda(args.cuda)
 
         # Using lower learning rate than suggested by (ADAM authors) lr=0.0002  and Beta_1 = 0.5 instead od 0.9 works better [Radford2015]
-        self.d_optimizer = torch.optim.Adam(self.D.parameters(), lr=0.0001, betas=(0.5, 0.999))
+        self.g_optimizer = torch.optim.Adam(self.D.parameters(), lr=0.0001, betas=(0.5, 0.9))
 
         if args.nm:
-            self.g_optimizer = torch.optim.Adam(self.G.parameters(), lr=0.0001, betas=(0.5, 0.999))
+            self.d_optimizer = Adamp(self.G.parameters(), lr=0.0001, betas=(-0.5, 0.9))
         else:
-            self.g_optimizer = Adamp(self.G.parameters(), lr=0.0001, betas=(-0.5, 0.9))
+            self.d_optimizer = torch.optim.Adam(self.G.parameters(), lr=0.0001, betas=(0.5, 0.9))
 
         self.epochs = args.epochs
         self.batch_size = args.batch_size
@@ -200,9 +200,15 @@ class DCGAN_MODEL(object):
         generator_iter = 0
         if args.nm:
             print('Negative Momentum is on!')
-            self.file = open("inception_score_graph_DCGAN_NM.txt", "w")
+            if args.sat:
+                self.file = open("inception_score_graph_DCGAN_NM_SAT.txt", "w")
+            else:
+                self.file = open("inception_score_graph_DCGAN_NM.txt", "w")
         else:
-            self.file = open("inception_score_graph_DCGAN.txt", "w")
+            if args.sat:
+                self.file = open("inception_score_graph_DCGAN_SAT.txt", "w")
+            else:
+                self.file = open("inception_score_graph_DCGAN.txt", "w")
 
         for epoch in range(self.epochs):
             self.epoch_start_time = t.time()
@@ -254,7 +260,10 @@ class DCGAN_MODEL(object):
                     z = Variable(torch.randn(self.batch_size, 100, 1, 1))
                 fake_images = self.G(z)
                 outputs = self.D(fake_images)
-                g_loss = self.loss(outputs, real_labels)
+                if args.sat:
+                    g_loss = -self.loss(outputs, fake_labels)
+                else:
+                    g_loss = self.loss(outputs, real_labels)
 
                 # Optimize generator
                 self.D.zero_grad()
