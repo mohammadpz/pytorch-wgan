@@ -6,7 +6,7 @@ def parse_args():
 
     parser.add_argument('--model', type=str, default='DCGAN', choices=['DCGAN', 'WGAN-GP'])
     parser.add_argument('--is_train', type=str, default='True')
-    parser.add_argument('--dataroot', default='datasets/cifar')
+    parser.add_argument('--dataroot', default='/mnt/dataset1')
     parser.add_argument('--dataset', type=str, default='cifar')
     parser.add_argument('--download', type=str, default='False')
     parser.add_argument('--epochs', type=int, default=100, help='The number of epochs to run')

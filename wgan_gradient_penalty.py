@@ -126,7 +126,7 @@ class WGAN_GP(object):
 
     def train(self, train_loader, args):
         self.t_begin = t.time()
-        self.file = open("inception_score_graph_wgan.txt", "w")
+        self.file = open("/results/inception_score_graph_wgan.txt", "w")
 
         # Now batches are callable self.data.next()
         self.data = self.get_infinite_batches(train_loader)

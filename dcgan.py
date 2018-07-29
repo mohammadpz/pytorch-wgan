@@ -194,7 +194,12 @@ class DCGAN_MODEL(object):
     def train(self, train_loader, args):
         self.t_begin = t.time()
         generator_iter = 0
-        self.file = open("inception_score_graph_dcgan.txt", "w")
+        rest = ''
+        if args.nm:
+            rest += '_nm'
+        if args.sat:
+            rest += '_sat'
+        self.file = open("/resluts/inception_score_graph_dcgan" + rest + ".txt", "w")
 
         for epoch in range(self.epochs):
             self.epoch_start_time = t.time()
