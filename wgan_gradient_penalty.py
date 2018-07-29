@@ -150,7 +150,7 @@ class WGAN_GP(object):
             for d_iter in range(self.critic_iter):
                 self.D.zero_grad()
 
-                images = self.data.next()
+                images = self.data.__next__()
                 # Check for batch to have full batch_size
                 if (images.size()[0] != self.batch_size):
                     continue

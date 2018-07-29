@@ -18,6 +18,8 @@ def parse_args():
     parser.add_argument('--generator_iters', type=int, default=78100, help='The number of iterations for generator in WGAN model.')
     parser.add_argument('--nm', action='store_true')
     parser.add_argument('--sat', action='store_true')
+    parser.add_argument('--mom', type=float, default=0.0)
+    parser.add_argument('--b2', type=float, default=0.9)
     return check_args(parser.parse_args())
 
 # Checking arguments

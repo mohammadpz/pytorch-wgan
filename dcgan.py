@@ -167,12 +167,15 @@ class DCGAN_MODEL(object):
         # check if cuda is available
         self.check_cuda(args.cuda)
 
-        if args.nm:
-            self.d_optimizer = Adamp(self.D.parameters(), lr=0.0002, betas=(-0.5, 0.9))
-        else:
-            self.d_optimizer = torch.optim.Adam(self.D.parameters(), lr=0.0002, betas=(0.5, 0.9))
+        mom = args.b1
+        b2 = args.b2
 
-        self.g_optimizer = torch.optim.Adam(self.G.parameters(), lr=0.0002, betas=(0.5, 0.9))
+        if args.nm:
+            self.d_optimizer = Adamp(self.D.parameters(), lr=0.0002, betas=(mom, b2))
+        else:
+            self.d_optimizer = torch.optim.Adam(self.D.parameters(), lr=0.0002, betas=(0.5, b2))
+
+        self.g_optimizer = torch.optim.Adam(self.G.parameters(), lr=0.0002, betas=(0.5, b2))
 
         self.epochs = args.epochs
         self.batch_size = args.batch_size
@@ -199,7 +202,7 @@ class DCGAN_MODEL(object):
             rest += '_nm'
         if args.sat:
             rest += '_sat'
-        self.file = open("/resluts/inception_score_graph_dcgan" + rest + ".txt", "w")
+        self.file = open("/results/inception_score_graph_dcgan" + rest + ".txt", "w")
 
         for epoch in range(self.epochs):
             self.epoch_start_time = t.time()
